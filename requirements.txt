@@ -1,0 +1,5 @@
+runpod==1.7.13
+boto3==1.35.99
+# CPU wheel (the package is named onnxruntime, not onnxruntime-cpu).
+# Match FaceFusion 3.3.2's own dependency pin.
+onnxruntime==1.22.0

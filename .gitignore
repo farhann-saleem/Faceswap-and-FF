@@ -1,0 +1,38 @@
+# Secrets — never commit. Same rule as youtube/automation/config/.env
+.env
+.env.*
+!.env.example
+.envrc
+*.pem
+*.key
+id_rsa
+id_ed25519
+credentials.json
+secrets.json
+rclone.conf
+.aws/
+.huggingface/
+
+# Weights — live on R2 / RunPod network volume, not git
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.bin
+models/
+weights/
+comfy-models/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
