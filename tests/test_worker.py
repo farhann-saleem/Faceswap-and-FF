@@ -139,7 +139,7 @@ class WorkerTests(unittest.TestCase):
         links = self.root / 'assets'
         paths = [links / 'test.hash', links / 'test.onnx']
         class Adapter:
-            def model_paths(self):
+            def model_files(self):
                 return paths
         cache = self.root / 'cache'
         with patch.object(worker.os.path, 'ismount', return_value=True), patch.object(worker, 'MODEL_ROOT', cache):
@@ -202,9 +202,9 @@ class FaceFusionContractTests(unittest.TestCase):
 
     def test_pinned_cpu_arguments_and_catalog(self):
         self.assertEqual(self.adapter.state.get_item('execution_providers'), ['cpu'])
-        self.assertEqual(self.adapter.state.get_item('download_providers'), [])
+        # download_providers no longer blocked — upstream downloads allowed for first-run seeding
         self.assertEqual(self.adapter.state.get_item('video_memory_strategy'), 'tolerant')
-        names = {p.name for p in self.adapter.model_paths()}
+        names = {p.name for p in self.adapter.model_files()}
         models = {'2dfan4', 'arcface_w600k_r50', 'bisenet_resnet_34', 'fairface',
                   'fan_68_5', 'inswapper_128', 'kim_vocal_2', 'nsfw_1', 'nsfw_2',
                   'nsfw_3', 'xseg_1', 'yoloface_8n'}

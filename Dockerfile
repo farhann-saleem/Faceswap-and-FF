@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir --timeout 120 --retries 10 -r /opt/facefusion/req
 WORKDIR /opt/facefusion
 COPY handler.py facefusion_cpu.py /app/
 # Validate the actual upstream parser and model catalog without downloading weights.
-RUN python -c "import sys; sys.path.insert(0, '/app'); from facefusion_cpu import FaceFusionCPU; assert FaceFusionCPU().model_paths()"
+RUN python -c "import sys; sys.path.insert(0, '/app'); from facefusion_cpu import FaceFusionCPU; assert FaceFusionCPU().model_files()"
 ARG WORKER_BUILD=cpu-v1
 ENV WORKER_BUILD=${WORKER_BUILD}
 CMD ["python", "-u", "/app/handler.py"]
