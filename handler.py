@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import uuid
+import zlib
 
 from pathlib import Path
 
@@ -178,6 +179,35 @@ def _seed_r2_after_init():
             print(f'  R2 seed failed for {f.name}: {exc}', flush=True)
     if seeded:
         print(f'>>> seeded {seeded} model files to R2 at {MODEL_PREFIX}/', flush=True)
+
+
+def ensure_weights(adapter):
+    """Ensure weights and hashes from volume cache or R2 are properly mounted and symlinked."""
+    if not os.path.ismount(VOLUME):
+        raise RuntimeError('/runpod-volume is not mounted; attach a network volume in the same datacenter')
+    if adapter is None:
+        return
+    MODEL_ROOT.mkdir(parents=True, exist_ok=True)
+    files = adapter.model_files() if hasattr(adapter, 'model_files') else (adapter.model_paths() if hasattr(adapter, 'model_paths') else [])
+    for path in files:
+        dest = MODEL_ROOT / path.name
+        key = f'{MODEL_PREFIX}/{path.name}'
+        if path.suffix == '.onnx':
+            hash_file = MODEL_ROOT / (path.stem + '.hash')
+            if hash_file.is_file() and dest.is_file():
+                expected_crc = hash_file.read_text().strip()
+                try:
+                    actual_crc = f'{zlib.crc32(dest.read_bytes()):08x}'
+                    if actual_crc.lower() != expected_crc.lower():
+                        dest.unlink(missing_ok=True)
+                except Exception:
+                    dest.unlink(missing_ok=True)
+        if not dest.is_file():
+            _download(key, dest, cached=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink() or path.exists():
+            path.unlink()
+        path.symlink_to(dest)
 
 
 def initialize():

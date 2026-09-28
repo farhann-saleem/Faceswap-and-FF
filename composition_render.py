@@ -299,9 +299,80 @@ def _serve(directory: Path, mime_types: Optional[Dict[str, str]] = None) -> sock
     return server
 
 
+# YouTube Loudness Target Specification (ITU-R BS.1770-4 / EBU R128)
+# - Target Integrated Loudness: -14.0 LUFS (YouTube reference loudness target)
+# - Maximum True Peak: -1.5 dBTP (YouTube ceiling is -1.0 dBTP; -1.5 dBTP margin prevents AAC codec inter-sample clipping)
+# - Target Loudness Range (LRA): 7.0 LU (dialogue-focused documentary standard)
+# - Target Dialogue / Voice: -16.0 LUFS
+# - Maximum Editorial Continuous Silence: 1.5 seconds
+YOUTUBE_LOUDNESS_TARGET = {
+    'integrated_lufs': -14.0,
+    'true_peak_dbtp': -1.5,
+    'loudness_range_lu': 7.0,
+    'threshold_lufs': -24.0,
+    'platform': 'YouTube',
+    'standard': 'ITU-R BS.1770-4 / EBU R128',
+    'dialogue_target_lufs': -16.0,
+    'max_editorial_silence_sec': 1.5,
+}
+
+
+def _check_source_audio_clipping(file_path: Path, key: str) -> Optional[str]:
+    """Check if an input audio source has digital clipping (samples reaching 0 dBFS peak)."""
+    try:
+        cmd = [
+            'ffmpeg', '-hide_banner', '-nostdin', '-y', '-i', str(file_path),
+            '-af', 'volumedetect',
+            '-f', 'null', '-',
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+        m = re.search(r'max_volume:\s*([+-]?[0-9.]+)\s*dB', proc.stderr or '')
+        if m:
+            max_vol = float(m.group(1))
+            if max_vol >= -0.01:
+                return f"Source audio '{key}' reaches {max_vol:+.1f} dBFS peak (possible digital clipping)"
+    except Exception:
+        pass
+    return None
+
+
+def _detect_silence(file_path: Path, max_allowed: float = 1.5) -> Tuple[List[str], float]:
+    """Detect any continuous audio silence exceeding the editorial threshold."""
+    warnings: List[str] = []
+    max_silence = 0.0
+    try:
+        cmd = [
+            'ffmpeg', '-hide_banner', '-nostdin', '-y', '-i', str(file_path),
+            '-af', f'silencedetect=noise=-50dB:d={max_allowed}',
+            '-f', 'null', '-',
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        output = proc.stderr or ''
+        for m in re.finditer(r'silence_end:\s*([0-9.]+)\s*\|\s*silence_duration:\s*([0-9.]+)', output):
+            end_sec = float(m.group(1))
+            dur_sec = float(m.group(2))
+            start_sec = max(0.0, end_sec - dur_sec)
+            if dur_sec > max_silence:
+                max_silence = dur_sec
+            if dur_sec > max_allowed:
+                warnings.append(
+                    f"Silence of {dur_sec:.2f}s detected ({start_sec:.2f}s to {end_sec:.2f}s), exceeding editorial allowance of {max_allowed}s"
+                )
+    except Exception:
+        pass
+    return warnings, round(max_silence, 2)
+
+
 def _measure_loudness(file_path: Path) -> Dict[str, Any]:
     """Analyze rendered audio using FFmpeg loudnorm/EBU filter to record measured loudness."""
-    target = {'integrated_lufs': -14.0, 'true_peak_dbtp': -1.5}
+    stats: Dict[str, Any] = {
+        'integrated_loudness_lufs': -14.0,
+        'true_peak_dbtp': -1.5,
+        'loudness_range_lu': 7.0,
+        'threshold_lufs': -24.0,
+        'target_offset_lu': 0.0,
+        'loudness_target': dict(YOUTUBE_LOUDNESS_TARGET),
+    }
     try:
         cmd = [
             'ffmpeg', '-hide_banner', '-nostdin', '-y', '-i', str(file_path),
@@ -314,22 +385,14 @@ def _measure_loudness(file_path: Path) -> Dict[str, Any]:
         end = output.rfind('}')
         if start != -1 and end != -1 and end > start:
             data = json.loads(output[start:end + 1])
-            return {
-                'integrated_loudness_lufs': round(float(data.get('input_i', -14.0)), 2),
-                'true_peak_dbtp': round(float(data.get('input_tp', -1.5)), 2),
-                'loudness_range_lu': round(float(data.get('input_lra', 7.0)), 2),
-                'threshold_lufs': round(float(data.get('input_thresh', -24.0)), 2),
-                'loudness_target': target,
-            }
+            stats['integrated_loudness_lufs'] = round(float(data.get('input_i', -14.0)), 2)
+            stats['true_peak_dbtp'] = round(float(data.get('input_tp', -1.5)), 2)
+            stats['loudness_range_lu'] = round(float(data.get('input_lra', 7.0)), 2)
+            stats['threshold_lufs'] = round(float(data.get('input_thresh', -24.0)), 2)
+            stats['target_offset_lu'] = round(float(data.get('target_offset', 0.0)), 2)
     except Exception:
         pass
-    return {
-        'integrated_loudness_lufs': -14.0,
-        'true_peak_dbtp': -1.5,
-        'loudness_range_lu': 7.0,
-        'threshold_lufs': -24.0,
-        'loudness_target': target,
-    }
+    return stats
 
 
 
@@ -414,6 +477,51 @@ def _mix(picture: Path, plan: Dict[str, Any], files: Dict[str, Path], work: Path
         '-t', str(duration), '-movflags', '+faststart', str(output),
     ])
     loudness_meta = _measure_loudness(output)
+
+    # 1. Source audio clipping check (warns on digital clipping >= 0 dBFS peak)
+    clipping_warnings = []
+    for bed in beds:
+        local_f = files.get(bed['key'])
+        if local_f and local_f.is_file():
+            warn = _check_source_audio_clipping(local_f, bed['key'])
+            if warn:
+                clipping_warnings.append(warn)
+    loudness_meta['clipping_warnings'] = clipping_warnings
+
+    # 2. Silence detection: verify no silence longer than editorial limit (1.5s)
+    silence_warnings, max_silence = _detect_silence(output, max_allowed=1.5)
+    loudness_meta['silence_warnings'] = silence_warnings
+    loudness_meta['max_silence_sec'] = max_silence
+
+    # 3. Two-pass EBU R128 correction: apply linear pass 2 if dynamic pass drifted by > 0.8 LU and offset exists
+    if abs(loudness_meta['integrated_loudness_lufs'] - (-14.0)) > 0.8 and loudness_meta.get('target_offset_lu', 0) != 0:
+        try:
+            linear_p2 = (
+                f'loudnorm=I=-14:LRA=7:TP=-1.5'
+                f':measured_I={loudness_meta["integrated_loudness_lufs"]}'
+                f':measured_TP={loudness_meta["true_peak_dbtp"]}'
+                f':measured_LRA={loudness_meta["loudness_range_lu"]}'
+                f':measured_thresh={loudness_meta["threshold_lufs"]}'
+                f':offset={loudness_meta["target_offset_lu"]}'
+                f':linear=true,alimiter=limit=0.84:level=0'
+            )
+            p2_output = work / 'composition-v2-p2.mp4'
+            worker._ffmpeg([
+                '-i', str(output),
+                '-af', linear_p2,
+                '-c:v', 'copy', '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-b:a', '256k',
+                '-t', str(duration), '-movflags', '+faststart', str(p2_output),
+            ])
+            if p2_output.is_file() and p2_output.stat().st_size > 0:
+                p2_output.replace(output)
+                p2_meta = _measure_loudness(output)
+                p2_meta['clipping_warnings'] = clipping_warnings
+                p2_meta['silence_warnings'] = silence_warnings
+                p2_meta['max_silence_sec'] = max_silence
+                loudness_meta = p2_meta
+        except Exception:
+            pass
+
     return output, loudness_meta
 
 
