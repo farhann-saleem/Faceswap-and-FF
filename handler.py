@@ -237,6 +237,9 @@ def _integer(inp, name, default, lo, hi):
 
 
 def stitch(inp, work):
+    if 'timeline' in inp:
+        from timeline_stitch import render
+        return render(inp, work, sys.modules[__name__])
     keys = inp.get('clip_keys', inp.get('clips'))
     if not isinstance(keys, list) or not 1 <= len(keys) <= 100:
         raise ValueError('clip_keys must contain 1–100 R2 video keys')
@@ -346,16 +349,21 @@ def handler(job):
                     'facefusion_ready': _facefusion is not None, 'volume_mounted': os.path.ismount(VOLUME),
                     'free_gb': round(shutil.disk_usage(VOLUME if VOLUME.exists() else '/').free / 1e9, 2),
                     'allow_generate': ALLOW, 'build': BUILD, 'worker_id': os.getenv('RUNPOD_POD_ID'),
-                    'init_error': _init_error}
-        if op not in {'swap', 'stitch'}:
-            raise ValueError(f'unknown op {op}. Use ping, swap, or stitch')
+                    'init_error': _init_error, 'timeline_version': 1, 'composition_version': 2, 'composition_engine': 'remotion', 'engine_build': BUILD, 'features': ['word-timing', 'kinetic-type', 'counters', 'masks', 'map-callouts', 'lower-thirds', 'scene-transitions', 'audio-ducking']}
+        if op not in {'swap', 'stitch', 'compose_v2'}:
+            raise ValueError(f'unknown op {op}. Use ping, swap, stitch, or compose_v2')
         if not ALLOW:
             raise RuntimeError('ALLOW_GENERATE is off. No FaceFusion download or processing is allowed')
         with LOCK:
             root = VOLUME if os.path.ismount(VOLUME) else Path('/tmp')
             _disk(root)
             with tempfile.TemporaryDirectory(prefix='cpu-job-', dir=root) as temp:
-                output, metadata = (swap if op == 'swap' else stitch)(inp, Path(temp))
+                
+                if op == 'compose_v2':
+                    from composition_render import render as compose_v2
+                    output, metadata = compose_v2(inp, Path(temp), sys.modules[__name__])
+                else:
+                    output, metadata = (swap if op == 'swap' else stitch)(inp, Path(temp))
                 if not output.is_file() or output.stat().st_size == 0:
                     raise RuntimeError('Processing produced no output')
                 bucket, client = _r2()

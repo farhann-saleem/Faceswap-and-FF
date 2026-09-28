@@ -36,3 +36,8 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# Node / Remotion
+node_modules/
+*.mp4
+.remotion/
