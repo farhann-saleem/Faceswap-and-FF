@@ -207,6 +207,17 @@ class _RangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return self.server_mime_types[filename]
         return super().guess_type(path)
 
+    def _send_cors_headers(self) -> None:
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', '*')
+        self.send_header('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type')
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self._send_cors_headers()
+        self.end_headers()
+
     def do_HEAD(self) -> None:
         self._send_response_data(is_head=True)
 
@@ -228,6 +239,7 @@ class _RangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Content-Type', mime_type)
             self.send_header('Content-Length', str(file_size))
             self.send_header('Accept-Ranges', 'bytes')
+            self._send_cors_headers()
             self.end_headers()
             if not is_head:
                 with open(resolved, 'rb') as f:
@@ -238,6 +250,7 @@ class _RangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if not match:
             self.send_response(416)
             self.send_header('Content-Range', f'bytes */{file_size}')
+            self._send_cors_headers()
             self.end_headers()
             return
 
@@ -255,12 +268,14 @@ class _RangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         else:
             self.send_response(416)
             self.send_header('Content-Range', f'bytes */{file_size}')
+            self._send_cors_headers()
             self.end_headers()
             return
 
         if start >= file_size or end >= file_size or start > end:
             self.send_response(416)
             self.send_header('Content-Range', f'bytes */{file_size}')
+            self._send_cors_headers()
             self.end_headers()
             return
 
@@ -270,6 +285,7 @@ class _RangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
         self.send_header('Content-Length', str(length))
         self.send_header('Accept-Ranges', 'bytes')
+        self._send_cors_headers()
         self.end_headers()
 
         if not is_head:

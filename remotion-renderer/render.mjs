@@ -53,7 +53,7 @@ await renderMedia({
   inputProps,
   browserExecutable: browserExecutable || undefined,
   chromiumOptions: {
-    disableWebSecurity: false,
+    disableWebSecurity: true,
     headless: true,
   },
   concurrency: 2,
