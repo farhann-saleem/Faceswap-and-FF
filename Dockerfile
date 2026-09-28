@@ -22,9 +22,13 @@ RUN apt-get update \
 RUN git clone --branch 3.3.2 --depth 1 https://github.com/facefusion/facefusion.git /opt/facefusion \
     && rm -rf /opt/facefusion/.git
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --timeout 120 --retries 10 -r /opt/facefusion/requirements.txt -r /app/requirements.txt \
+RUN grep -vE '^(gradio|gradio-rangeslider|psutil)([=<>]|$)' /opt/facefusion/requirements.txt > /tmp/ff-req.txt \
+    && echo "psutil>=7.0.0" >> /tmp/ff-req.txt \
+    && pip install --no-cache-dir --timeout 120 --retries 10 -r /tmp/ff-req.txt -r /app/requirements.txt \
     && pip check \
     && python -c "import onnxruntime as ort; assert 'CPUExecutionProvider' in ort.get_available_providers(); assert 'CUDAExecutionProvider' not in ort.get_available_providers()"
+
+
 
 WORKDIR /opt/facefusion
 COPY handler.py facefusion_cpu.py timeline_stitch.py composition_render.py /app/

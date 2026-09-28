@@ -304,7 +304,7 @@ def stitch(inp, work):
         args += ['-map', '0:v:0', '-map', '0:a:0' if has_audio else '1:a:0',
                  '-vf', vf, '-af', 'aresample=48000:async=1:first_pts=0,apad',
                  '-t', str(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-                 '-pix_fmt', 'yuv420p', '-threads', str(THREADS), '-video_track_timescale', '90000',
+                 '-pix_fmt', 'yuv420p', '-threads', str(THREADS), '-r', str(fps), '-video_track_timescale', '90000',
                  '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-b:a', '192k', str(segment)]
         _ffmpeg(args)
         segments.append(segment)
